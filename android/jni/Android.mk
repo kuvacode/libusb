@@ -18,6 +18,10 @@
 
 LOCAL_PATH:= $(call my-dir)
 
+ifeq ($(NDK_DEBUG),1)
+    cmd-strip := 
+endif
+
 include $(LOCAL_PATH)/libusb.mk
 include $(LOCAL_PATH)/examples.mk
 include $(LOCAL_PATH)/tests.mk
