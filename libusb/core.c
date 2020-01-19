@@ -2738,3 +2738,14 @@ const struct libusb_version * LIBUSB_CALL libusb_get_version(void)
 {
 	return &libusb_version_internal;
 }
+
+int API_EXPORTED libusb_import_android_fd(libusb_context *ctx,
+	uint8_t busnum, uint8_t devaddr, int fd, int is_open)
+{
+	ctx = usbi_get_context(ctx);
+
+	if (usbi_backend.import_android_fd)
+		return usbi_backend.import_android_fd(ctx, busnum, devaddr, fd, is_open);
+
+	return LIBUSB_ERROR_NOT_SUPPORTED;
+}

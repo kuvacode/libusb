@@ -2047,6 +2047,9 @@ enum libusb_option {
 
 int LIBUSB_CALL libusb_set_option(libusb_context *ctx, enum libusb_option option, ...);
 
+int LIBUSB_CALL libusb_import_android_fd(libusb_context *ctx,
+	uint8_t busnum, uint8_t devaddr, int fd, int is_open);
+
 #ifdef __cplusplus
 }
 #endif

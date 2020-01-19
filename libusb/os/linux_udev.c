@@ -295,7 +295,7 @@ int linux_udev_scan_devices(struct libusb_context *ctx)
 			continue;
 		}
 
-		linux_enumerate_device(ctx, busnum, devaddr, sys_name);
+		linux_enumerate_device(ctx, busnum, devaddr, sys_name, -1);
 		udev_device_unref(udev_dev);
 	}
 

@@ -1157,6 +1157,9 @@ struct usbi_os_backend {
 	 */
 	int (*clock_gettime)(int clkid, struct timespec *tp);
 
+	int (*import_android_fd)(struct libusb_context *ctx,
+		uint8_t busnum, uint8_t devaddr, int fd, int is_open);
+
 	/* Number of bytes to reserve for per-context private backend data.
 	 * This private data area is accessible through the "os_priv" field of
 	 * struct libusb_context. */

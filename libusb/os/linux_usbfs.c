@@ -117,6 +117,7 @@ struct linux_device_priv {
 	unsigned char *descriptors;
 	int descriptors_len;
 	int active_config; /* cache val for !sysfs_available  */
+	int imported_fd;
 };
 
 struct linux_device_handle_priv {
@@ -157,11 +158,26 @@ struct linux_transfer_priv {
 	int iso_packet_offset;
 };
 
+static struct linux_device_priv *_device_priv(struct libusb_device *dev)
+{
+	return (struct linux_device_priv *)dev->os_priv;
+}
+
+static struct linux_device_handle_priv *_device_handle_priv(
+	struct libusb_device_handle *handle)
+{
+	return (struct linux_device_handle_priv *)handle->os_priv;
+}
+
 static int get_usbfs_fd(struct libusb_device *dev, mode_t mode, int silent)
 {
+	struct linux_device_priv *priv = _device_priv(dev);
 	struct libusb_context *ctx = DEVICE_CTX(dev);
 	char path[24];
 	int fd;
+
+	if (priv->imported_fd >= 0)
+		return dup(priv->imported_fd);
 
 	if (usbdev_names)
 		sprintf(path, USBDEV_PATH "/usbdev%u.%u",
@@ -200,17 +216,6 @@ static int get_usbfs_fd(struct libusb_device *dev, mode_t mode, int silent)
 	if (errno == ENOENT)
 		return LIBUSB_ERROR_NO_DEVICE;
 	return LIBUSB_ERROR_IO;
-}
-
-static struct linux_device_priv *_device_priv(struct libusb_device *dev)
-{
-	return (struct linux_device_priv *)dev->os_priv;
-}
-
-static struct linux_device_handle_priv *_device_handle_priv(
-	struct libusb_device_handle *handle)
-{
-	return (struct linux_device_handle_priv *)handle->os_priv;
 }
 
 /* check dirent for a /dev/usbdev%d.%d name
@@ -547,7 +552,7 @@ static int sysfs_scan_device(struct libusb_context *ctx, const char *devname)
 	if (ret != LIBUSB_SUCCESS)
 		return ret;
 
-	return linux_enumerate_device(ctx, busnum, devaddr, devname);
+	return linux_enumerate_device(ctx, busnum, devaddr, devname, -1);
 }
 
 /* read the bConfigurationValue for a device */
@@ -846,6 +851,8 @@ static int initialize_device(struct libusb_device *dev, uint8_t busnum,
 	dev->bus_number = busnum;
 	dev->device_address = devaddr;
 
+	priv->imported_fd = -1;
+
 	if (sysfs_dir) {
 		priv->sysfs_dir = strdup(sysfs_dir);
 		if (!priv->sysfs_dir)
@@ -1016,7 +1023,7 @@ retry:
 }
 
 int linux_enumerate_device(struct libusb_context *ctx,
-	uint8_t busnum, uint8_t devaddr, const char *sysfs_dir)
+	uint8_t busnum, uint8_t devaddr, const char *sysfs_dir, int fd)
 {
 	unsigned long session_id;
 	struct libusb_device *dev;
@@ -1042,7 +1049,7 @@ int linux_enumerate_device(struct libusb_context *ctx,
 	if (!dev)
 		return LIBUSB_ERROR_NO_MEM;
 
-	r = initialize_device(dev, busnum, devaddr, sysfs_dir, -1);
+	r = initialize_device(dev, busnum, devaddr, sysfs_dir, fd);
 	if (r < 0)
 		goto out;
 	r = usbi_sanitize_device(dev);
@@ -1052,6 +1059,12 @@ int linux_enumerate_device(struct libusb_context *ctx,
 	r = linux_get_parent_info(dev, sysfs_dir);
 	if (r < 0)
 		goto out;
+
+	if (fd >= 0) {
+		struct linux_device_priv *priv = _device_priv(dev);
+		priv->imported_fd = fd;
+	}
+
 out:
 	if (r < 0)
 		libusb_unref_device(dev);
@@ -1067,7 +1080,7 @@ void linux_hotplug_enumerate(uint8_t busnum, uint8_t devaddr, const char *sys_na
 
 	usbi_mutex_static_lock(&active_contexts_lock);
 	list_for_each_entry(ctx, &active_contexts_list, list, struct libusb_context) {
-		linux_enumerate_device(ctx, busnum, devaddr, sys_name);
+		linux_enumerate_device(ctx, busnum, devaddr, sys_name, -1);
 	}
 	usbi_mutex_static_unlock(&active_contexts_lock);
 }
@@ -1090,6 +1103,18 @@ void linux_device_disconnected(uint8_t busnum, uint8_t devaddr)
 	}
 	usbi_mutex_static_unlock(&active_contexts_lock);
 }
+
+#ifdef __ANDROID__
+static int op_import_android_fd(struct libusb_context *ctx,
+	uint8_t busnum, uint8_t devaddr, int fd, int is_open)
+{
+	if (is_open)
+		return linux_enumerate_device(ctx, busnum, devaddr, NULL, fd);
+
+	linux_device_disconnected(busnum, devaddr);
+	return 0;
+}
+#endif
 
 #if !defined(HAVE_LIBUDEV)
 static int parse_u8(const char *str, uint8_t *val_p)
@@ -1137,7 +1162,7 @@ static int usbfs_scan_busdir(struct libusb_context *ctx, uint8_t busnum)
 			continue;
 		}
 
-		if (linux_enumerate_device(ctx, busnum, devaddr, NULL)) {
+		if (linux_enumerate_device(ctx, busnum, devaddr, NULL, -1)) {
 			usbi_dbg("failed to enumerate dir entry %s", entry->d_name);
 			continue;
 		}
@@ -1174,7 +1199,7 @@ static int usbfs_get_device_list(struct libusb_context *ctx)
 			if (!is_usbdev_entry(entry->d_name, &busnum, &devaddr))
 				continue;
 
-			r = linux_enumerate_device(ctx, busnum, devaddr, NULL);
+			r = linux_enumerate_device(ctx, busnum, devaddr, NULL, -1);
 			if (r < 0) {
 				usbi_dbg("failed to enumerate dir entry %s", entry->d_name);
 				continue;
@@ -2717,6 +2742,10 @@ const struct usbi_os_backend usbi_backend = {
 	.handle_events = op_handle_events,
 
 	.clock_gettime = op_clock_gettime,
+
+#ifdef __ANDROID__
+	.import_android_fd = op_import_android_fd,
+#endif
 
 	.device_priv_size = sizeof(struct linux_device_priv),
 	.device_handle_priv_size = sizeof(struct linux_device_handle_priv),
