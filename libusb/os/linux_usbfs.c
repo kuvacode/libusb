@@ -434,6 +434,11 @@ static int linux_scan_devices(struct libusb_context *ctx)
 	ret = linux_default_scan_devices(ctx);
 #endif
 
+#ifdef __ANDROID__
+	/* ignore errors on android */
+	ret = 0;
+#endif
+
 	usbi_mutex_static_unlock(&linux_hotplug_lock);
 
 	return ret;
