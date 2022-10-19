@@ -2435,6 +2435,13 @@ const struct windows_usb_api_backend usb_api_backend[USB_API_MAX] = {
 		}										\
 	} while (0)
 
+static HMODULE load_library(const char *name)
+{
+	char library_path[MAX_PATH];
+	sprintf(library_path, "%s.dll", name);
+	return LoadLibraryA(library_path);
+}
+
 static bool winusbx_init(struct libusb_context *ctx)
 {
 	HMODULE hWinUSB, hlibusbK;
@@ -2479,7 +2486,7 @@ cleanup_winusb:
 		usbi_info(ctx, "WinUSB DLL is not available");
 	}
 
-	hlibusbK = load_system_library(ctx, "libusbK");
+	hlibusbK = load_library("libusbK");
 	if (hlibusbK != NULL) {
 		LibK_GetVersion_t pLibK_GetVersion;
 		LibK_GetProcAddress_t pLibK_GetProcAddress;
